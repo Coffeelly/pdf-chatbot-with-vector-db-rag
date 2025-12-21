@@ -1,4 +1,4 @@
-# Streamlit RAG Chatbot
+# PDF Chatbot using RAG and Vector Database
 
 A Retrieval-Augmented Generation (RAG) application that enables users to upload PDF documents and engage in conversational Q&A with the content. This application utilizes a local vector database for data persistence, local embeddings for privacy and speed, and the Groq API for high-performance inference.
 
@@ -75,4 +75,5 @@ To clear the memory completely:
 2. Manually delete the qdrant_db_local folder located in the project root directory.
 
 3. Restart the application
+
 
