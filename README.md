@@ -23,8 +23,8 @@ Follow these steps to set up the project environment.
 ### 1. Clone the Repository
 
 ```
-git clone https://github.com/Coffeelly/Chatbot-PC-Builder.git
-cd Chatbot-PDF-Reader
+git clone https://github.com/Coffeelly/pdf-chatbot-with-vector-db-rag.git
+cd pdf-chatbot-with-vector-db-rag
 ```
 
 ### 2. Install Dependencies
@@ -33,7 +33,7 @@ This project uses an environment.yml file to manage dependencies.
 
 ```
 conda env create -f environment.yml
-conda activate chatbot-pc-builder
+conda activate pdf-chatbot-with-vector-db-rag
 ```
 
 ### 3. Configure API Keys
@@ -41,7 +41,7 @@ conda activate chatbot-pc-builder
 Create a .env file in the root directory. You need API keys from Google AI Studio and Serper.dev.
 
 ```
-GROQ_API_KEY="your_google_gemini_api_key"
+GROQ_API_KEY="your_GROQ_api_key"
 ```
 
 ### 4. Run the Application
@@ -60,7 +60,7 @@ Ensure your project files are organized as follows:
 │   ├── __init__.py
 │   └── rag_engine.py      # Core RAG logic (PDF processing, embeddings, chain)
 ├── .env                   # Environment variables (Groq API Key)
-├── .gitignore
+├── environment.yml        # Conda environment configuration
 └── app.py                 # Streamlit frontend application
 ```
 
@@ -75,3 +75,4 @@ To clear the memory completely:
 2. Manually delete the qdrant_db_local folder located in the project root directory.
 
 3. Restart the application
+
