@@ -74,6 +74,11 @@ To clear the memory completely:
 
 2. Manually delete the qdrant_db_local folder located in the project root directory.
 
+## Demo Video
+
+https://github.com/user-attachments/assets/f1f9e7c6-aa1d-466f-926c-4e38bf203786
+
 3. Restart the application
+
 
 
