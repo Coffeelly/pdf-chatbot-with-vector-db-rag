@@ -1,5 +1,5 @@
 import streamlit as st
-import fitz  # <--- NEW: PyMuPDF (Replaces PyPDF2 for better reading)
+import fitz  
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -126,4 +126,5 @@ def clear_database():
     # 3. Explicitly close the connection to release the file lock
     client.close()
     
+
     return True
