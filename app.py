@@ -1,121 +1,177 @@
 import streamlit as st
 import os
-import uuid
 from langchain_core.messages import HumanMessage, AIMessage
 from src.rag_engine import (
     load_and_split_pdf, 
     setup_vector_store, 
     get_rag_chain, 
     generate_summary,
-    clear_database
+    get_qdrant_client,
+    delete_session_data
 )
+import src.db as db
 
-st.set_page_config(page_title="PDF Chatbot", page_icon="🤖")
-st.header("🤖 Understand Your PDF")
+st.set_page_config(page_title="PDF Multi-Chat", page_icon="📚", layout="wide")
 
-# Check API Key
-if not os.getenv("GROQ_API_KEY"):
-    st.error("Groq API Key not found. Please set it in the .env file.")
-    st.stop()
+# --- 1. SETUP DATABASE ---
+db.init_db()
 
-# --- INIT SESSION STATE ---
-if "uploader_key" not in st.session_state:
-    st.session_state.uploader_key = str(uuid.uuid4())
+# --- 2. SESSION STATE MANAGEMENT ---
+# Default state is None (no chat selected)
+if "current_session_id" not in st.session_state:
+    st.session_state.current_session_id = None
 
+# switch to old chat session
+def switch_session(session_id):
+    st.session_state.current_session_id = session_id
+
+# Prepare the interface for a new chat (but don’t create the database yet)
+def init_new_chat_view():
+    st.session_state.current_session_id = None
+
+# --- 3. SIDEBAR (History Chat) ---
 with st.sidebar:
-    st.title("Settings")
+    st.title(" Chat History")
     
-    # --- UPDATED: RESET BUTTON ---
-    if st.button("🗑️ Reset", type="primary"):
-        try:
-            # 1. Clear the actual database on disk
-            clear_database()
-        except Exception as e:
-            st.warning(f"Note: Database file might be locked. {e}")
-            
-        # 2. Clear Python's cached connection
-        st.cache_resource.clear()
-        
-        # 3. Clear the UI memory (Chat history, summary, etc)
-        st.session_state.clear()
-        
-        # 4. Generate a NEW Key. This forces the file uploader to "re-render" as empty.
-        st.session_state.uploader_key = str(uuid.uuid4())
-        
-        # 5. Rerun
+    # New Chat Button
+    if st.button("➕ New Chat", use_container_width=True, type="primary"):
+        init_new_chat_view()
         st.rerun()
+    
+    # --- DELETE ACTIVE CHAT ---
+    if st.session_state.current_session_id is not None:
+        if st.button("🗑️ Delete Current Chat", use_container_width=True):
+            # 1. Delete Vector in Qdrant
+            with st.spinner("Deleting memories..."):
+                delete_session_data(st.session_state.current_session_id)
+            
+            # 2. Delete data in SQLite
+            db.delete_session(st.session_state.current_session_id)
+            
+            # 3. Reset State
+            st.session_state.current_session_id = None
+            st.success("Chat deleted!")
+            st.rerun()
 
     st.divider()
-
-    st.header("Upload File")
     
-    # ensure the key exists again because cleared the session above
-    if "uploader_key" not in st.session_state:
-        st.session_state.uploader_key = str(uuid.uuid4())
+    # List Chat from database
+    sessions = db.get_all_sessions()
+    if not sessions:
+        st.caption("No chat history.")
+        
+    for sess in sessions:
+        # button to change chat
+        if st.button(f" {sess['title']}", key=f"sess_{sess['id']}", use_container_width=True):
+            switch_session(sess['id'])
+            st.rerun()
 
-    # --- FILE UPLOADER ---
-    # added 'key=...'. When the key changes, this widget is destroyed and recreated.
-    uploaded_file = st.file_uploader(
-        "Choose a PDF", 
-        type="pdf", 
-        key=st.session_state.uploader_key
-    )
+# --- 4. MAIN CONTENT LOGIC ---
+current_session_id = st.session_state.current_session_id
+
+# === SCENARIO A: NO SESSION (Upload/Draft) ===
+if current_session_id is None:
+    st.header("✨ Start New Chat")
+    st.info("Please upload PDF to start a new chat.")
+    
+    # Widget Upload
+    uploaded_file = st.file_uploader("Upload PDF Document", type="pdf")
     
     if uploaded_file:
-        if "last_uploaded" not in st.session_state or st.session_state.last_uploaded != uploaded_file.name:
-            with st.spinner("Processing PDF..."):
+        if st.button(" Process & Start Chat", type="primary"):
+            with st.spinner("Analyzing Document..."):
+                # 1. CREATE NEW SESSION ON DATABASE
+                # Session only created when user process the pdf
+                new_id = db.create_session(title=uploaded_file.name)
+                
+                # 2. process PDF
                 raw_text, chunks = load_and_split_pdf(uploaded_file)
-                vector_store = setup_vector_store(chunks)
                 
-                st.session_state.vector_store = vector_store
-                st.session_state.summary = generate_summary(raw_text)
-                st.session_state.last_uploaded = uploaded_file.name
-                st.session_state.messages = [] 
+                # 3. store to Qdrant with the new created session id
+                setup_vector_store(chunks, new_id)
                 
-            st.success("Done!")
+                # 4. Generate Summary 
+                summary = generate_summary(raw_text)
+                db.add_message(new_id, "assistant", f"**Document Ready!**\n\nSummary:\n{summary}")
+                
+                # 5. Update State & Rerun
+                st.session_state.current_session_id = new_id
+                st.rerun() 
 
-if "summary" in st.session_state:
-    with st.expander("Document Summary", expanded=True):
-        st.write(st.session_state.summary)
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    if prompt := st.chat_input("Ask a question about the PDF..."):
-        st.chat_message("user").markdown(prompt)
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
-        if "vector_store" in st.session_state:
-            rag_chain = get_rag_chain(st.session_state.vector_store)
-            
-            # 1. Convert session state to LangChain history format
-            #    exclude the very last message (the new one) because the chain adds it automatically
-            chat_history = []
-            for msg in st.session_state.messages[:-1]:
-                if msg["role"] == "user":
-                    chat_history.append(HumanMessage(content=msg["content"]))
-                elif msg["role"] == "assistant":
-                    chat_history.append(AIMessage(content=msg["content"]))
-
-            with st.spinner("Thinking..."):
-                # 2. Pass 'chat_history' to the chain
-                response = rag_chain.invoke({
-                    "input": prompt,
-                    "chat_history": chat_history 
-                })
-                answer = response["answer"]
-                source_docs = response["context"]
-            
-            with st.chat_message("assistant"):
-                st.markdown(answer)
-                with st.expander("Debug: What did AI read?"):
-                    for i, doc in enumerate(source_docs):
-                        st.caption(f"**Chunk {i+1}:** {doc.page_content[:200]}...")
-
-            st.session_state.messages.append({"role": "assistant", "content": answer})
+# === SKENARIO B: SESSION IS ACTIVE (Chatting Mode) ===
 else:
-    st.info("👈 Please upload a PDF to start.")
+    # FETCH SESSION DATA
+    
+    # 1. Fetch Title From Database
+    session_title = db.get_session_title(current_session_id)
+    
+    # 2. Display Title
+    st.header(f" {session_title}")
+        
+    # --- DISPLAY MESSAGE ---
+    chat_container = st.container()
+    stored_messages = db.get_messages(current_session_id)
+    
+    with chat_container:
+        if not stored_messages:
+            st.info("Empty chat.")
+        
+        for msg in stored_messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+    # --- INPUT USER & RAG PROCESS ---
+    if prompt := st.chat_input("Ask about your PDF..."):
+        # 1. Display & Save User Chat
+        with chat_container:
+            with st.chat_message("user"):
+                st.markdown(prompt)
+        db.add_message(current_session_id, "user", prompt)
+
+        # 2. Generate Answer (WITH DEBUGGING VISUAL)
+        with chat_container:
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        client = get_qdrant_client()
+                        
+                        # Call Chain
+                        rag_chain = get_rag_chain(client, current_session_id)
+                        
+                        # history
+                        chat_history_lc = []
+                        for msg in stored_messages:
+                            if msg["role"] == "user":
+                                chat_history_lc.append(HumanMessage(content=msg["content"]))
+                            elif msg["role"] == "assistant":
+                                chat_history_lc.append(AIMessage(content=msg["content"]))
+
+                        # Execute
+                        response = rag_chain.invoke({
+                            "input": prompt,
+                            "chat_history": chat_history_lc
+                        })
+                        
+                        answer = response["answer"]
+                        retrieved_docs = response["context"] # Dokumen yang ditemukan
+                        
+                        # --- DISPLAY MAIN ANSWER ---
+                        st.markdown(answer)
+                        
+                        # display debugging
+                        with st.expander(" Debug: What LLM reads?"):
+                            if not retrieved_docs:
+                                st.error(" The LLM did not find any relevant information in the PDF.")
+                            else:
+                                st.caption(f"Found {len(retrieved_docs)} relevant text excerpts:")
+                                for i, doc in enumerate(retrieved_docs):
+                                    st.markdown(f"** excerpts #{i+1}**")
+                                    st.code(doc.page_content, language="text") 
+                                    st.divider()
+                        
+                        # 3. Save LLM Answer To Database
+                        db.add_message(current_session_id, "assistant", answer)
+
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+                        print(f" ERROR DETAIL: {e}")
