@@ -77,7 +77,7 @@ Ensure your project files are organized as follows:
 
 ## Demo Video
 
-https://github.com/user-attachments/assets/f1f9e7c6-aa1d-466f-926c-4e38bf203786
+https://github.com/user-attachments/assets/f5081f0a-0aec-4ca8-b69a-c9f53ab7bfd0
 
 Future Roadmap (To-Do)
 [ ] Implement Streaming Response (Typewriter effect).
@@ -87,3 +87,4 @@ Future Roadmap (To-Do)
 [ ] Add support for uploading multiple PDFs in a single session.
 
 [ ] Add "Regenerate Answer" button.
+
